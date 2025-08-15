@@ -43,7 +43,7 @@ except Exception:
 BASE_DIR = PROJECT_ROOT                    # .../sentiment analysis
 DEFAULT_DB = BASE_DIR / "data" / "sentiment.db"
 DB_PATH = Path(os.getenv("SENTIMENT_DB", str(DEFAULT_DB))).resolve()
-
+CACHE_TTL = int(os.getenv("CACHE_TTL", "3600"))  
 # ──────────────────────────────────────────────────────────────────────────────
 # Streamlit page config & styles
 # ──────────────────────────────────────────────────────────────────────────────
@@ -165,7 +165,7 @@ def extract_asset_mentions(text: str, config_assets: Dict) -> List[str]:
 # ──────────────────────────────────────────────────────────────────────────────
 # Data loading (ORIGINAL)
 # ──────────────────────────────────────────────────────────────────────────────
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
 def load_sentiment_data(db_file: Path = DB_PATH) -> pd.DataFrame:
     """
     Load posts with AI sentiment columns if they exist.
@@ -257,7 +257,7 @@ def load_sentiment_data(db_file: Path = DB_PATH) -> pd.DataFrame:
         st.error(f"Error loading sentiment data from {db_file} — {e}")
         return pd.DataFrame()
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
 def get_stock_prices(symbols: List[str]) -> Dict[str, Dict]:
     """Get current stock prices via StockDataProvider (if available)."""
     if not MODELS_AVAILABLE or not symbols:

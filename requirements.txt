@@ -1,0 +1,28 @@
+# Core Reddit and data processing
+praw>=7.7.0
+pandas>=2.0.0
+numpy>=1.24.0
+PyYAML>=6.0
+schedule>=1.2.0
+
+# Text processing and language detection
+emoji>=2.2.0
+langdetect>=1.0.9
+
+# Dashboard and visualization
+streamlit>=1.28.0
+plotly>=5.15.0
+wordcloud>=1.9.0
+matplotlib>=3.7.0
+
+# AI/ML and sentiment analysis
+torch>=2.0.0
+transformers>=4.30.0
+scikit-learn>=1.3.0
+
+# Stock data and financial APIs
+yfinance>=0.2.18
+requests>=2.31.0
+
+# Additional utilities
+pytz>=2023.3

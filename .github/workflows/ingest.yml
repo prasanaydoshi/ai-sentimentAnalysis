@@ -1,14 +1,10 @@
-name: Ingest Reddit Sentiment (AI, hourly 12-20 Toronto)
+name: Ingest Reddit Sentiment (AI)
 
 on:
   schedule:
-    - cron: "0 * * * *"   # every hour (UTC); we gate to 12-20 Toronto below
-  workflow_dispatch:
-    inputs:
-      force:
-        description: "Run even outside 12-20 Toronto?"
-        required: false
-        default: "false"
+    - cron: "0 16-23 * * *"   # 12–7 pm Toronto (EDT) -> 16–23 UTC
+    - cron: "0 0 * * *"       # 8 pm Toronto (EDT) -> 00 UTC next day
+  workflow_dispatch: {}
 
 permissions:
   contents: write
@@ -20,72 +16,37 @@ concurrency:
 jobs:
   ingest:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 25
     env:
       TZ: America/Toronto
       MODEL_ID: distilbert-base-uncased-finetuned-sst-2-english
-      HF_HOME: ~/.cache/huggingface
       TOKENIZERS_PARALLELISM: "false"
+      TRANSFORMERS_NO_ADVISORY_WARNINGS: "1"
+      HF_HOME: ~/.cache/huggingface
       PYTHONUNBUFFERED: "1"
 
     steps:
-      # Checkout full history so we can rebase before push
       - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
 
-      # EARLY GATE: fast skip outside the window unless force=true
-      - name: Gate - run only 12:00-20:00 Toronto (unless forced)
-        id: gate
-        run: |
-          H=$(date +%H)
-          echo "Toronto hour=$H"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.force }}" = "true" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [ "$H" -ge 12 ] && [ "$H" -le 20 ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Skip (outside 12-20 Toronto)
-        if: steps.gate.outputs.run != 'true'
-        run: echo "Outside window - skipping ingestion."
-
-      # Everything below runs only when gate says run=true
-      - name: Ensure data dirs
-        if: steps.gate.outputs.run == 'true'
-        run: mkdir -p data data/raw
-
-      - name: Setup Python
-        if: steps.gate.outputs.run == 'true'
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Cache HuggingFace models
-        if: steps.gate.outputs.run == 'true'
-        uses: actions/cache@v4
+      # Cache HF models to avoid re-downloading each run
+      - uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
           key: hf-${{ runner.os }}-${{ env.MODEL_ID }}-${{ hashFiles('requirements.txt') }}
           restore-keys: |
             hf-${{ runner.os }}-
 
-      - name: Install dependencies
-        if: steps.gate.outputs.run == 'true'
+      - name: Install deps
         run: |
           pip install -U pip
           pip install -r requirements.txt
-          # CPU torch fallback to reduce install hiccups
-          pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu || true
 
       - name: Write config.yaml from secrets (and assets)
-        if: steps.gate.outputs.run == 'true'
         run: |
           cat > config.yaml <<'YAML'
           reddit:
@@ -98,16 +59,13 @@ jobs:
             crypto:  [BTC, ETH, bitcoin, ethereum]
           settings:
             reddit_poll_minutes: 30
-            max_reddit_posts: 200
           YAML
 
       - name: Run collector with AI
-        if: steps.gate.outputs.run == 'true'
         run: |
           python ingestion/orchestrator.py --mode once --with-ai --model "$MODEL_ID" --batch-size 8
 
-      - name: Vacuum DB (shrink file)
-        if: steps.gate.outputs.run == 'true'
+      - name: (Optional) Vacuum DB to keep size small
         run: |
           python - <<'PY'
           import sqlite3, os
@@ -116,27 +74,10 @@ jobs:
               con=sqlite3.connect(db); con.execute('VACUUM'); con.close()
           PY
 
-      - name: Upload DB as artifact
-        if: steps.gate.outputs.run == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: sentiment-db
-          path: data/sentiment.db
-          if-no-files-found: warn
-
-      # Prepare branch and rebase before pushing the updated DB
-      - name: Prepare branch
-        if: steps.gate.outputs.run == 'true'
+      - name: Commit DB updates
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git checkout main
-          git pull --rebase origin main
-
-      - name: Commit DB updates
-        if: steps.gate.outputs.run == 'true'
-        run: |
-          git add -f data/sentiment.db data/raw || true
-          git commit -m "chore(data): hourly AI refresh [skip ci]" || echo "No changes"
+          git add data/sentiment.db data/raw || true
+          git commit -m "chore(data): refresh with AI sentiment [skip ci]" || echo "No changes"
           git push

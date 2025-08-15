@@ -81,3 +81,15 @@ jobs:
           git add data/sentiment.db data/raw || true
           git commit -m "chore(data): refresh with AI sentiment [skip ci]" || echo "No changes"
           git push
+      - name: Write last_run.json
+        run: |
+          python - <<'PY'
+          import json, os, time, subprocess, pathlib
+          pathlib.Path('data').mkdir(exist_ok=True)
+          info = {
+              "ended_at_utc": time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime()),
+              "commit": subprocess.check_output(['git','rev-parse','HEAD']).decode().strip()
+            }
+          with open('data/last_run.json','w') as f:
+          json.dump(info, f, indent=2)
+          PY

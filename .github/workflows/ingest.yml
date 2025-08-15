@@ -2,8 +2,13 @@ name: Ingest Reddit Sentiment (AI, hourly 12–20 Toronto)
 
 on:
   schedule:
-    - cron: "0 * * * *"        # every hour (UTC); we gate to 12–20 Toronto below
-  workflow_dispatch: {}
+    - cron: "0 * * * *"              # every hour (UTC), we gate below to 12–20 Toronto
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Run even outside 12–20 Toronto?"
+        required: false
+        default: "false"
 
 permissions:
   contents: write
@@ -15,24 +20,50 @@ concurrency:
 jobs:
   ingest:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     env:
       TZ: America/Toronto
       MODEL_ID: distilbert-base-uncased-finetuned-sst-2-english
-      TOKENIZERS_PARALLELISM: "false"
-      TRANSFORMERS_NO_ADVISORY_WARNINGS: "1"
       HF_HOME: ~/.cache/huggingface
+      TOKENIZERS_PARALLELISM: "false"
       PYTHONUNBUFFERED: "1"
 
     steps:
       - uses: actions/checkout@v4
 
+      # ── EARLY GATE (runs fast; skips the rest off-hours) ────────────────────
+      - name: Gate: run only 12:00–20:00 Toronto (unless forced)
+        id: gate
+        run: |
+          H=$(date +%H)
+          echo "Toronto hour=$H"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.force }}" = "true" ]; then
+            echo "run=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          if [ "$H" -ge 12 ] && [ "$H" -le 20 ]; then
+            echo "run=true" >> $GITHUB_OUTPUT
+          else
+            echo "run=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Skip (outside 12–20 Toronto)
+        if: steps.gate.outputs.run != 'true'
+        run: echo "Outside window — skipping ingestion."
+
+      # ── Everything below only runs in-window or when forced ─────────────────
+      - name: Ensure data dirs
+        if: steps.gate.outputs.run == 'true'
+        run: mkdir -p data data/raw
+
       - uses: actions/setup-python@v5
+        if: steps.gate.outputs.run == 'true'
         with:
           python-version: "3.11"
           cache: "pip"
 
       - name: Cache HuggingFace models
+        if: steps.gate.outputs.run == 'true'
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
@@ -41,19 +72,12 @@ jobs:
             hf-${{ runner.os }}-
 
       - name: Install dependencies
+        if: steps.gate.outputs.run == 'true'
         run: |
           pip install -U pip
           pip install -r requirements.txt
-
-      - name: Gate: run only 12:00–20:00 Toronto time
-        id: gate
-        run: |
-          H=$(date +%H); echo "Hour(Toronto)=$H"
-          if [ "$H" -ge 12 ] && [ "$H" -le 20 ]; then
-            echo "run=true" >> $GITHUB_OUTPUT
-          else
-            echo "run=false" >> $GITHUB_OUTPUT
-          fi
+          # Ensure CPU torch is available on the runner (robust on ubuntu-latest)
+          pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu || true
 
       - name: Write config.yaml from secrets (and assets)
         if: steps.gate.outputs.run == 'true'
@@ -93,7 +117,7 @@ jobs:
         with:
           name: sentiment-db
           path: data/sentiment.db
-          if-no-files-found: ignore
+          if-no-files-found: warn
 
       - name: Commit DB updates
         if: steps.gate.outputs.run == 'true'

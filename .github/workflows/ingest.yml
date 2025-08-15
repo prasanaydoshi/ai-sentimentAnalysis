@@ -1,12 +1,12 @@
-name: Ingest Reddit Sentiment (AI, hourly 12–20 Toronto)
+name: Ingest Reddit Sentiment (AI, hourly 12-20 Toronto)
 
 on:
   schedule:
-    - cron: "0 * * * *"              # every hour (UTC), we gate below to 12–20 Toronto
+    - cron: "0 * * * *"   # every hour (UTC); we gate to 12-20 Toronto below
   workflow_dispatch:
     inputs:
       force:
-        description: "Run even outside 12–20 Toronto?"
+        description: "Run even outside 12-20 Toronto?"
         required: false
         default: "false"
 
@@ -29,35 +29,40 @@ jobs:
       PYTHONUNBUFFERED: "1"
 
     steps:
+      # Checkout full history so we can rebase before push
       - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
 
-      # ── EARLY GATE (runs fast; skips the rest off-hours) ────────────────────
-      - name: Gate: run only 12:00–20:00 Toronto (unless forced)
+      # EARLY GATE: fast skip outside the window unless force=true
+      - name: Gate: run only 12:00-20:00 Toronto (unless forced)
         id: gate
         run: |
           H=$(date +%H)
           echo "Toronto hour=$H"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.force }}" = "true" ]; then
-            echo "run=true" >> $GITHUB_OUTPUT
+            echo "run=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if [ "$H" -ge 12 ] && [ "$H" -le 20 ]; then
-            echo "run=true" >> $GITHUB_OUTPUT
+            echo "run=true" >> "$GITHUB_OUTPUT"
           else
-            echo "run=false" >> $GITHUB_OUTPUT
+            echo "run=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Skip (outside 12–20 Toronto)
+      - name: Skip (outside 12-20 Toronto)
         if: steps.gate.outputs.run != 'true'
-        run: echo "Outside window — skipping ingestion."
+        run: echo "Outside window - skipping ingestion."
 
-      # ── Everything below only runs in-window or when forced ─────────────────
+      # Everything below runs only when gate says run=true
       - name: Ensure data dirs
         if: steps.gate.outputs.run == 'true'
         run: mkdir -p data data/raw
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python
         if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
@@ -76,7 +81,7 @@ jobs:
         run: |
           pip install -U pip
           pip install -r requirements.txt
-          # Ensure CPU torch is available on the runner (robust on ubuntu-latest)
+          # CPU torch fallback to reduce install hiccups
           pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu || true
 
       - name: Write config.yaml from secrets (and assets)
@@ -119,11 +124,19 @@ jobs:
           path: data/sentiment.db
           if-no-files-found: warn
 
-      - name: Commit DB updates
+      # Prepare branch and rebase before pushing the updated DB
+      - name: Prepare branch
         if: steps.gate.outputs.run == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout main
+          git pull --rebase origin main
+
+      - name: Commit DB updates
+        if: steps.gate.outputs.run == 'true'
+        run: |
           git add -f data/sentiment.db data/raw || true
           git commit -m "chore(data): hourly AI refresh [skip ci]" || echo "No changes"
           git push

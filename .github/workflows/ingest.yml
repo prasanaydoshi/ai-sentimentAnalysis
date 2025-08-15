@@ -36,7 +36,7 @@ jobs:
           fetch-depth: 0
 
       # EARLY GATE: fast skip outside the window unless force=true
-      - name: Gate: run only 12:00-20:00 Toronto (unless forced)
+      - name: Gate - run only 12:00-20:00 Toronto (unless forced)
         id: gate
         run: |
           H=$(date +%H)

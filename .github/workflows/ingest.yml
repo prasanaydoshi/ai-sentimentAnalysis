@@ -1,0 +1,42 @@
+name: Ingest Reddit Sentiment
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -U pip && pip install -r requirements.txt
+      - name: Write config from secrets
+        run: |
+          mkdir -p .streamlit
+          cat > config.yaml <<'YAML'
+          reddit:
+            client_id: ${{ secrets.REDDIT_CLIENT_ID }}
+            client_secret: ${{ secrets.REDDIT_CLIENT_SECRET }}
+            user_agent: reddit-sentiment-app/0.1 by ${{ github.repository_owner }}
+          assets:
+            tickers: [AAPL, MSFT, NVDA]
+            brands:  [Apple, Microsoft, Nvidia]
+            crypto:  [BTC, ETH, bitcoin]
+          settings:
+            reddit_poll_minutes: 30
+          YAML
+      - name: Run collector (no AI)
+        run: python ingestion/orchestrator.py --mode once
+      - name: Commit DB updates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/sentiment.db data/raw || true
+          git commit -m "chore(data): refresh sentiment DB [skip ci]" || echo "No changes"
+          git push

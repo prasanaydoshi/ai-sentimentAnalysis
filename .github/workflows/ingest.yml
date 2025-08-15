@@ -1,18 +1,14 @@
 name: Ingest Reddit Sentiment (AI)
-
 on:
   schedule:
     - cron: "0 16-23 * * *"   # 12–7 pm Toronto (EDT) -> 16–23 UTC
     - cron: "0 0 * * *"       # 8 pm Toronto (EDT) -> 00 UTC next day
   workflow_dispatch: {}
-
 permissions:
   contents: write
-
 concurrency:
   group: reddit-ai-ingest
   cancel-in-progress: false
-
 jobs:
   ingest:
     runs-on: ubuntu-latest
@@ -24,15 +20,12 @@ jobs:
       TRANSFORMERS_NO_ADVISORY_WARNINGS: "1"
       HF_HOME: ~/.cache/huggingface
       PYTHONUNBUFFERED: "1"
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
-
       # Cache HF models to avoid re-downloading each run
       - uses: actions/cache@v4
         with:
@@ -40,12 +33,10 @@ jobs:
           key: hf-${{ runner.os }}-${{ env.MODEL_ID }}-${{ hashFiles('requirements.txt') }}
           restore-keys: |
             hf-${{ runner.os }}-
-
       - name: Install deps
         run: |
           pip install -U pip
           pip install -r requirements.txt
-
       - name: Write config.yaml from secrets (and assets)
         run: |
           cat > config.yaml <<'YAML'
@@ -60,11 +51,9 @@ jobs:
           settings:
             reddit_poll_minutes: 30
           YAML
-
       - name: Run collector with AI
         run: |
           python ingestion/orchestrator.py --mode once --with-ai --model "$MODEL_ID" --batch-size 8
-
       - name: (Optional) Vacuum DB to keep size small
         run: |
           python - <<'PY'
@@ -73,7 +62,6 @@ jobs:
           if os.path.exists(db):
               con=sqlite3.connect(db); con.execute('VACUUM'); con.close()
           PY
-
       - name: Commit DB updates
         run: |
           git config user.name "github-actions[bot]"
@@ -91,5 +79,5 @@ jobs:
               "commit": subprocess.check_output(['git','rev-parse','HEAD']).decode().strip()
             }
           with open('data/last_run.json','w') as f:
-          json.dump(info, f, indent=2)
+              json.dump(info, f, indent=2)
           PY
